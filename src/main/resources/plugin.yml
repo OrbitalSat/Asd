@@ -2,6 +2,7 @@ name: PluginLoader
 version: git-${project.version}
 main: me.perro.dev.pluginloader.MainLoader
 description: Plugin que carga otros plugins dentro de la carpeta sub-plugins
+author: PerroDev
 commands:
   pluginloader:
     description: Comandos principales del PluginLoader
