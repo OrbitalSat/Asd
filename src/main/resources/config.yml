@@ -1,0 +1,33 @@
+# Configuración del PluginLoader & Downloader
+
+# Modo de depuración - muestra mensajes adicionales si está activado
+debug-mode: false
+
+# Configuración para descargar artefactos de GitHub
+github:
+  enabled: true
+  #TODO: Intervalo de comprobación en minutos (predeterminado: 60)
+  check-interval: 60
+  # Eliminar archivos ZIP después de extraer los plugins
+  delete-after-extract: true
+  # Comprobar automáticamente actualizaciones al iniciar
+  check-on-startup: true
+  # Lista de repositorios para descargar artefactos
+  repositories:
+    example-plugin:
+      owner: "example-user"         # Usuario o organización de GitHub
+      repo: "example-repo"      # Nombre del repositorio
+      workflow: "build.yml"       # Nombre del archivo de workflow
+      branch: "master"              # Rama para buscar ejecuciones
+      artifact: "Plugin*"    # Patrón para el nombre del artefacto
+      token: ""                   # Token de GitHub (opcional, para repos privados)
+      auto-update: true           # TODO: Actualizar automáticamente este plugin
+
+    # Puedes agregar más repositorios si es necesario
+    # otro-plugin:
+    #   owner: "otro-usuario"
+    #   repo: "otro-repo"
+    #   workflow: "maven.yml"
+    #   branch: "master"
+    #   artifact: "Plugin2*"
+    #   auto-update: false        # Este plugin no se actualizará automáticamente
