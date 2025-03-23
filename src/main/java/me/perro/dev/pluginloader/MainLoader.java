@@ -6,6 +6,7 @@ import org.bukkit.plugin.InvalidDescriptionException;
 import org.bukkit.plugin.InvalidPluginException;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.scheduler.BukkitTask;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
@@ -15,6 +16,8 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
 import java.util.logging.Level;
@@ -25,6 +28,19 @@ public class MainLoader extends JavaPlugin {
     private File downloadsFolder;
     private final String USER_AGENT = "PluginLoader/1.0";
     private VersionTracker versionTracker;
+    private BukkitTask updateCheckerTask;
+    private final Map<String, UpdateInfo> pendingUpdates = new HashMap<>();
+    public class UpdateInfo {
+        String owner;
+        String repo;
+        String artifactName;
+        String token;
+        long artifactId;
+        long runId;
+        String downloadUrl;
+        String name;
+        String version;
+    }
 
     @Override
     public void onLoad() {
@@ -49,7 +65,8 @@ public class MainLoader extends JavaPlugin {
 
         // Descargar plugins desde GitHub si está habilitado
         if (getConfig().getBoolean("github.enabled", false)) {
-            downloadPluginsFromGitHub();
+            boolean autoUpdateStartup = getConfig().getBoolean("github.auto-update-on-startup", false);
+            checkForUpdates(autoUpdateStartup);
         }
 
         // Cargar los sub-plugins
@@ -58,7 +75,20 @@ public class MainLoader extends JavaPlugin {
 
     public void onEnable() {
         getLogger().info("PluginLoader ha sido habilitado con éxito.");
-        getLogger().info("Coloca tus plugins en: " + subPluginsFolder.getAbsolutePath());
+
+        UpdateCommand updateCommand = new UpdateCommand(this);
+        getCommand("pluginloader").setExecutor(updateCommand);
+        getCommand("pluginloader").setTabCompleter(updateCommand);
+
+        if (getConfig().getBoolean("github.auto-check", true)) {
+            int checkInterval = getConfig().getInt("github.check-interval", 60) * 60 * 20;
+            updateCheckerTask = Bukkit.getScheduler().runTaskTimerAsynchronously(this, () -> {
+                getLogger().info("Comprobando actualizaciones programadas...");
+                checkForUpdates(false); // Solo comprueba, no descarga automáticamente
+            }, checkInterval, checkInterval);
+            getLogger().info("Auto-Checker de actualizaciones programado cada " +
+                    getConfig().getInt("github.check-interval", 60) + " minutos.");
+        }
     }
 
     @Override
@@ -67,112 +97,220 @@ public class MainLoader extends JavaPlugin {
         if (versionTracker != null) {
             versionTracker.saveVersionFile();
         }
-
+        if (updateCheckerTask != null) {
+            updateCheckerTask.cancel();
+        }
         getLogger().info("PluginLoader ha sido deshabilitado.");
     }
 
-    private void downloadPluginsFromGitHub() {
+    /**
+     * Comprueba si hay actualizaciones disponibles para todos los repositorios configurados
+     * @param autoDownload Si es true, descarga automáticamente las actualizaciones si están configuradas para ello
+     * @return Un mapa con las actualizaciones pendientes
+     */
+    public Map<String, UpdateInfo> checkForUpdates(boolean autoDownload) {
         getLogger().info("Comprobando actualizaciones desde GitHub...");
+        pendingUpdates.clear();
+        boolean isSync = Bukkit.getServer().isPrimaryThread();
 
-        for (String repoKey : getConfig().getConfigurationSection("github.repositories").getKeys(false)) {
-            String repoPath = "github.repositories." + repoKey + ".";
-            String owner = getConfig().getString(repoPath + "owner");
-            String repo = getConfig().getString(repoPath + "repo");
-            String artifactName = getConfig().getString(repoPath + "artifact", "*.jar");
-            String token = getConfig().getString(repoPath + "token", "");
-            String branch = getConfig().getString(repoPath + "branch", "main");
-            String workflow = getConfig().getString(repoPath + "workflow");
+        // Realizar la comprobación de manera asíncrona
+        Runnable checkTask = () -> {
+            for (String repoKey : getConfig().getConfigurationSection("github.repositories").getKeys(false)) {
+                String repoPath = "github.repositories." + repoKey + ".";
+                String owner = getConfig().getString(repoPath + "owner");
+                String repo = getConfig().getString(repoPath + "repo");
+                String artifactName = getConfig().getString(repoPath + "artifact", "*.jar");
+                String token = getConfig().getString(repoPath + "token", "");
+                String branch = getConfig().getString(repoPath + "branch", "main");
+                String workflow = getConfig().getString(repoPath + "workflow");
+                Boolean autoupdate = getConfig().getBoolean(repoPath + "auto-update");
 
-            if (owner == null || repo == null || workflow == null) {
-                getLogger().warning("Configuración incompleta para el repositorio: " + repoKey);
-                continue;
+                if (owner == null || repo == null || workflow == null) {
+                    getLogger().warning("Configuración incompleta para el repositorio: " + repoKey);
+                    continue;
+                }
+
+                getLogger().info("Verificando actualizaciones de " + owner + "/" + repo + " - workflow: " + workflow);
+
+                try {
+                    // Obtener el último ID de ejecución del workflow
+                    Long runId = getLatestWorkflowRunId(owner, repo, workflow, branch, token);
+
+                    if (runId == null) {
+                        getLogger().warning("No se encontraron ejecuciones de workflow para " + owner + "/" + repo);
+                        continue;
+                    }
+
+                    getLogger().info("Último ID de ejecución de workflow encontrado: " + runId);
+
+                    // Obtener la lista de artefactos
+                    JSONArray artifacts = getWorkflowRunArtifacts(owner, repo, runId, token);
+
+                    if (artifacts.isEmpty()) {
+                        getLogger().warning("No se encontraron artefactos para la ejecución " + runId);
+                        continue;
+                    }
+
+                    // Comprobar cada artefacto que coincida con el patrón
+                    boolean found = false;
+                    for (Object obj : artifacts) {
+                        JSONObject artifact = (JSONObject) obj;
+                        String name = (String) artifact.get("name");
+
+                        // Verificar si el nombre coincide con el patrón (usando * como comodín)
+                        if (matchesPattern(name, artifactName)) {
+                            long artifactId = (long) artifact.get("id");
+                            String downloadUrl = (String) artifact.get("archive_download_url");
+
+                            // Verificar si esta versión ya está instalada
+                            if (!versionTracker.isNewVersion(repoKey, artifactId, runId)) {
+                                getLogger().info("Ya tienes la última versión de " + name + " (Artifact ID: " + artifactId + ", Run ID: " + runId + ")");
+                                found = true;
+                                continue;
+                            }
+
+                            getLogger().info("¡Nueva versión disponible! Artefacto: " + name + " (ID: " + artifactId + ")");
+
+                            // Crear y almacenar la información de actualización
+                            UpdateInfo updateInfo = new UpdateInfo();
+                            updateInfo.owner = owner;
+                            updateInfo.repo = repo;
+                            updateInfo.artifactName = artifactName;
+                            updateInfo.token = token;
+                            updateInfo.artifactId = artifactId;
+                            updateInfo.runId = runId;
+                            updateInfo.downloadUrl = downloadUrl;
+                            updateInfo.name = name;
+                            updateInfo.version =  "(ID: " + artifactId + ")";
+
+                            pendingUpdates.put(repoKey, updateInfo);
+
+                            // Si está configurado para autoupdate y autoDownload es true, descargar ahora
+                            if (autoupdate && autoDownload) {
+                                downloadAndInstallUpdate(repoKey, updateInfo);
+                            }
+
+                            found = true;
+                        }
+                    }
+
+                    if (!found) {
+                        getLogger().warning("No se encontraron artefactos que coincidan con el patrón: " + artifactName);
+                    }
+
+                } catch (Exception e) {
+                    getLogger().log(Level.SEVERE, "Error al comprobar actualizaciones para " + owner + "/" + repo, e);
+                }
             }
 
-            getLogger().info("Verificando actualizaciones de " + owner + "/" + repo + " - workflow: " + workflow);
+            // Mostrar resumen de actualizaciones pendientes
+            if (!pendingUpdates.isEmpty()) {
+                getLogger().info("Se encontraron " + pendingUpdates.size() + " actualizaciones disponibles.");
+                for (Map.Entry<String, UpdateInfo> entry : pendingUpdates.entrySet()) {
+                    getLogger().info("- " + entry.getKey() + ": (ID: " + entry.getValue().artifactId + ")");
+                }
 
+                // Ofrecer comando para descargar todas las actualizaciones pendientes
+                if (!autoDownload) {
+                    getLogger().info("Usa el comando '/pluginloader update' para instalar todas las actualizaciones.");
+                }
+            } else {
+                getLogger().info("No se encontraron actualizaciones nuevas para ningún plugin.");
+            }
+        };
+
+        if (isSync && this.isEnabled()) {
+            Bukkit.getScheduler().runTaskAsynchronously(this, checkTask);
+        } else {
+            checkTask.run();
+        }
+
+        return pendingUpdates;
+    }
+
+    /**
+     * Descarga e instala una actualización específica
+     * @param repoKey Clave del repositorio en la configuración
+     * @param updateInfo Información de la actualización a descargar
+     */
+    public void downloadAndInstallUpdate(String repoKey, UpdateInfo updateInfo) {
+        getLogger().info("Descargando actualización para " + repoKey + "...");
+        boolean isSync = Bukkit.getServer().isPrimaryThread();
+        Runnable downloadTask = () -> {
             try {
-                // Obtener el último ID de ejecución del workflow
-                Long runId = getLatestWorkflowRunId(owner, repo, workflow, branch, token);
-
-                if (runId == null) {
-                    getLogger().warning("No se encontraron ejecuciones de workflow para " + owner + "/" + repo);
-                    continue;
-                }
-
-                getLogger().info("Último ID de ejecución de workflow encontrado: " + runId);
-
-                // Obtener la lista de artefactos
-                JSONArray artifacts = getWorkflowRunArtifacts(owner, repo, runId, token);
-
-                if (artifacts.isEmpty()) {
-                    getLogger().warning("No se encontraron artefactos para la ejecución " + runId);
-                    continue;
-                }
-
-                // Descargar cada artefacto que coincida con el patrón
-                boolean found = false;
-                for (Object obj : artifacts) {
-                    JSONObject artifact = (JSONObject) obj;
-                    String name = (String) artifact.get("name");
-
-                    // Verificar si el nombre coincide con el patrón (usando * como comodín)
-                    if (matchesPattern(name, artifactName)) {
-                        long artifactId = (long) artifact.get("id");
-                        String downloadUrl = (String) artifact.get("archive_download_url");
-
-                        // Verificar si esta versión ya está instalada
-                        if (!versionTracker.isNewVersion(repoKey, artifactId, runId)) {
-                            getLogger().info("Ya tienes la última versión de " + name + " (Artifact ID: " + artifactId + ", Run ID: " + runId + ")");
-                            found = true;
-                            continue;
-                        }
-
-                        getLogger().info("¡Nueva versión disponible! Descargando artefacto: " + name + " (ID: " + artifactId + ")");
-
-                        // Eliminar la versión anterior si existe
-                        String oldFileName = versionTracker.getCurrentPluginFileName(repoKey);
-                        if (oldFileName != null) {
-                            File oldFile = new File(subPluginsFolder, oldFileName);
-                            if (oldFile.exists() && oldFile.delete()) {
-                                getLogger().info("Versión anterior eliminada: " + oldFileName);
-                            }
-                        }
-
-                        // Crear un nombre de archivo único con fecha
-                        SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd-HHmmss");
-                        String timestamp = sdf.format(new Date());
-                        String fileName = repo + "-" + timestamp + ".zip";
-                        File zipFile = new File(downloadsFolder, fileName);
-
-                        // Descargar el archivo ZIP
-                        downloadFile(downloadUrl, zipFile, token);
-
-                        // Descomprimir el archivo ZIP y mover los JARs a la carpeta de sub-plugins
-                        String extractedFileName = extractJarsFromZip(zipFile, subPluginsFolder, repoKey);
-
-                        // Actualizar la información de versión
-                        if (extractedFileName != null) {
-                            versionTracker.updatePluginInfo(repoKey, String.valueOf(artifactId),
-                                    "run-" + runId, runId, extractedFileName);
-                            getLogger().info("Información de versión actualizada para " + repoKey);
-                        }
-
-                        found = true;
+                // Eliminar la versión anterior si existe
+                String oldFileName = versionTracker.getCurrentPluginFileName(repoKey);
+                if (oldFileName != null) {
+                    File oldFile = new File(subPluginsFolder, oldFileName);
+                    if (oldFile.exists() && oldFile.delete()) {
+                        getLogger().info("Versión anterior eliminada: " + oldFileName);
                     }
                 }
 
-                if (!found) {
-                    getLogger().warning("No se encontraron artefactos que coincidan con el patrón: " + artifactName);
+                // Crear un nombre de archivo único con fecha
+                SimpleDateFormat sdf = new SimpleDateFormat("yyyyMMdd-HHmmss");
+                String timestamp = sdf.format(new Date());
+                String fileName = updateInfo.repo + "-" + timestamp + ".zip";
+                File zipFile = new File(downloadsFolder, fileName);
+
+                // Descargar el archivo ZIP
+                downloadFile(updateInfo.downloadUrl, zipFile, updateInfo.token);
+
+                // Descomprimir el archivo ZIP y mover los JARs a la carpeta de sub-plugins
+                String extractedFileName = extractJarsFromZip(zipFile, subPluginsFolder, repoKey);
+
+                // Actualizar la información de versión
+                if (extractedFileName != null) {
+                    versionTracker.updatePluginInfo(repoKey, String.valueOf(updateInfo.artifactId),
+                            "run-" + updateInfo.runId, updateInfo.runId, extractedFileName);
+                    getLogger().info("Información de versión actualizada para " + repoKey);
+                    getLogger().info("Actualización completada para " + repoKey + ". Reinicia el servidor para cargar la nueva versión.");
                 }
 
+                // Eliminar esta actualización de la lista de pendientes
+                pendingUpdates.remove(repoKey);
+
             } catch (Exception e) {
-                getLogger().log(Level.SEVERE, "Error al descargar artefactos para " + owner + "/" + repo, e);
+                getLogger().log(Level.SEVERE, "Error al descargar e instalar la actualización para " + repoKey, e);
             }
+        };
+        if (isSync && this.isEnabled()) {
+            Bukkit.getScheduler().runTaskAsynchronously(this, downloadTask);
+        } else {
+            downloadTask.run();
+        }
+    }
+
+    /**
+     * Descarga e instala todas las actualizaciones pendientes
+     */
+    public void downloadAllPendingUpdates() {
+        if (pendingUpdates.isEmpty()) {
+            getLogger().info("No hay actualizaciones pendientes para descargar.");
+            return;
+        }
+
+        getLogger().info("Descargando " + pendingUpdates.size() + " actualizaciones pendientes...");
+        boolean isSync = Bukkit.getServer().isPrimaryThread();
+        Runnable downloadAllTask = () -> {
+            String[] keys = pendingUpdates.keySet().toArray(new String[0]);
+
+            for (String repoKey : keys) {
+                UpdateInfo updateInfo = pendingUpdates.get(repoKey);
+                if (updateInfo != null) {
+                    downloadAndInstallUpdate(repoKey, updateInfo);
+                }
+            }
+            getLogger().info("Todas las actualizaciones han sido descargadas. Reinicia el servidor para cargarlas.");
+        };
+        if (isSync && this.isEnabled()) {
+            Bukkit.getScheduler().runTaskAsynchronously(this, downloadAllTask);
+        } else {
+            downloadAllTask.run();
         }
     }
 
     private boolean matchesPattern(String name, String pattern) {
-        // Convertir el patrón a una expresión regular
         String regex = pattern.replace(".", "\\.").replace("*", ".*");
         return name.matches(regex);
     }
@@ -279,7 +417,7 @@ public class MainLoader extends JavaPlugin {
                     File outFile = new File(destFolder, new File(name).getName());
                     extractedFileName = outFile.getName();
 
-                    // Evitar la duplicación si el archivo ya existe
+                    // Evitar archivos duplicados
                     if (outFile.exists()) {
                         String baseName = outFile.getName().substring(0, outFile.getName().lastIndexOf('.'));
                         String extension = outFile.getName().substring(outFile.getName().lastIndexOf('.'));
