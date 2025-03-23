@@ -11,7 +11,7 @@ You can build this plugin using maven.
 
 1. Clone this repository
 2. Enter the directory: `cd PluginLoader`
-3. Build with Maven: `mvn clean package
+3. Build with Maven: `mvn clean package`
 
 ## Support
 If you need support, please contact `catprrmeow` on Discord.
