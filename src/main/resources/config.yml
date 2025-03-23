@@ -1,17 +1,12 @@
 # Configuración del PluginLoader & Downloader
 
-# Modo de depuración - muestra mensajes adicionales si está activado
-debug-mode: false
-
 # Configuración para descargar artefactos de GitHub
 github:
   enabled: true
-  #TODO: Intervalo de comprobación en minutos (predeterminado: 60)
-  check-interval: 60
-  # Eliminar archivos ZIP después de extraer los plugins
-  delete-after-extract: true
-  # Comprobar automáticamente actualizaciones al iniciar
-  check-on-startup: true
+  check-interval: 60 #Intervalo de comprobación de actualizaciones en minutos (predeterminado: 60)
+  delete-after-extract: true # Eliminar archivos ZIP después de extraer los plugins
+  check-on-startup: true # Comprobar automáticamente actualizaciones al iniciar
+  auto-update-on-startup: true # Actualizar automáticamente en startup
   # Lista de repositorios para descargar artefactos
   repositories:
     example-plugin:
@@ -21,7 +16,7 @@ github:
       branch: "master"              # Rama para buscar ejecuciones
       artifact: "Plugin*"    # Patrón para el nombre del artefacto
       token: ""                   # Token de GitHub (opcional, para repos privados)
-      auto-update: true           # TODO: Actualizar automáticamente este plugin
+      auto-update: true           # Además de descargar si no está instalado ya, Actualizar automáticamente este plugin
 
     # Puedes agregar más repositorios si es necesario
     # otro-plugin:
