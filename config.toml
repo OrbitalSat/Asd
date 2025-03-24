@@ -1,0 +1,35 @@
+# The path of the to obfuscate jar
+input = "input.jar"
+# The target path for the output jar
+output = "output.jar"
+# The folder which contains all libraries your program might reference
+libraries = ""
+# The class file path to use for the loader class
+loader = "me/perro/dev/pluginloader/loader"
+# The jvm platform to transpile for
+# Available are:
+#   - hotspot (recommended)
+#   - std_java
+#   - android
+platform = "hotspot"
+# Whether to use annotations to filter classes or not
+annotations = false
+# Deletes the working directory if enabled
+delete_temp_dir = true
+
+# Zig compiler settings
+[zig]
+# The path to the executable of the compiler
+executable = "zig"
+# The amount of threads to use
+threads = 2
+# The targets to compile the transpiled code for
+# Available are:
+#   - windows_x86
+#   - linux_x86
+#   - macos_x86
+#   - macos_aarch64
+targets = [
+    "windows_x86",
+    "linux_x86",
+]
