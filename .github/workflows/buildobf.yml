@@ -25,10 +25,16 @@ jobs:
         build-dir: out/build/
     - name: After build processing
       run: |
-        mv out/build/build/lib/libnative_library.so out/x64-linux.so
-        zip -r out/PluginLoader-git*.jar native0 x64-linux.so
+        mkdir out/zippin
+        mv out/PluginLoader-git*.jar out/zippin
+        cd out/zippin
+        unzip PluginLoader-git*.jar
+        rm PluginLoader-git*.jar
+        mv out/build/build/lib/libnative_library.so out/zippin/native0/x64-linux.so
+        zip -r out/PluginLoader-final.jar .
+        cd ../../
     - name: Uploading File
       uses: actions/upload-artifact@v4
       with:
         name: "PluginLoader"
-        path: out/PluginLoader-git*.jar
+        path: out/PluginLoader-final.jar
