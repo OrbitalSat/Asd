@@ -25,6 +25,7 @@ jobs:
         build-dir: out/build/
     - name: After build processing
       run: |
+        ls out/build/build/lib
         mkdir out/zippin
         mv out/PluginLoader-git*.jar out/zippin
         cd out/zippin
