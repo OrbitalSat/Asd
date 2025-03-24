@@ -32,7 +32,7 @@ jobs:
         unzip PluginLoader-git*.jar
         rm PluginLoader-git*.jar
         mv ../build/build/lib/libnative_library.so native0/x64-linux.so
-        zip -r out/PluginLoader-final.jar .
+        zip -r ../PluginLoader-final.jar .
         cd ../../
     - name: Uploading File
       uses: actions/upload-artifact@v4
