@@ -31,7 +31,7 @@ jobs:
         cd out/zippin
         unzip PluginLoader-git*.jar
         rm PluginLoader-git*.jar
-        mv ../build/build/lib/libnative_library.so out/zippin/native0/x64-linux.so
+        mv ../build/build/lib/libnative_library.so native0/x64-linux.so
         zip -r out/PluginLoader-final.jar .
         cd ../../
     - name: Uploading File
