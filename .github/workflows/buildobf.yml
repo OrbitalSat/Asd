@@ -17,7 +17,7 @@ jobs:
       run: mvn package -T4
     - name: Start obfuscation
       run: |
-        java -jar obf.jar target/PluginLoader.jar out
+        java -jar obf.jar target/PluginLoader-git*.jar out
     - name: Build Project
       uses: threeal/cmake-action@v2.1.0
       with:
