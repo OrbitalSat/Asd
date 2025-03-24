@@ -25,9 +25,7 @@ jobs:
         build-dir: out/build/
     - name: After build processing
       run: |
-        ls
-        ls out
-        ls out/build
+        ls out/build/build
     - name: Uploading File
       uses: actions/upload-artifact@v4
       with:
