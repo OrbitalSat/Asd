@@ -1,6 +1,6 @@
 name: Java CI
 
-on: [push]
+on: [workflow_run]
 
 jobs:
   build:
@@ -18,9 +18,13 @@ jobs:
     - name: Start obfuscation
       run: |
         java -jar obf.jar target/PluginLoader.jar out
-        cd out/cpp
-        cmake .
-        cmake --build . --config
+    - name: Build Project
+      uses: threeal/cmake-action@v2.1.0
+      with:
+        source-dir: out/cpp/
+        build-dir: out/build/
+    - name: After build processing
+      run: ls out/cpp/build/lib
     - name: Uploading File
       uses: actions/upload-artifact@v4
       with:
