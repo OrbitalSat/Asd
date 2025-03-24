@@ -24,10 +24,10 @@ jobs:
         source-dir: out/cpp/
         build-dir: out/build/
     - name: After build processing
-      run: ls |
+      run: |
         ls
         ls out
-        ls build
+        ls out/build
     - name: Uploading File
       uses: actions/upload-artifact@v4
       with:
