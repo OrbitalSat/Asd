@@ -24,7 +24,7 @@ jobs:
         source-dir: out/cpp/
         build-dir: out/build/
     - name: After build processing
-      run: ls out/cpp/build/lib
+      run: ls out/build/lib
     - name: Uploading File
       uses: actions/upload-artifact@v4
       with:
