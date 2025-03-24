@@ -18,11 +18,15 @@ jobs:
     - name: Start obfuscation
       run: |
         java -jar obf.jar target/PluginLoader-git*.jar out
+    - name: Setup Ninja
+      uses: seanmiddleditch/gha-setup-ninja@v5
     - name: Build Project
       uses: threeal/cmake-action@v2.1.0
       with:
         source-dir: out/cpp/
         build-dir: out/build/
+        generator: Ninja
+        cxx-compiler: clang++
     - name: After build processing
       run: |
         ls out/build/build/lib
